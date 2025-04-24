@@ -11,54 +11,36 @@ GRANT USAGE ON SCHEMA core TO APPLICATION ROLE app_public;
 
 -- 3. Create UDFs and Stored Procedures using the python code you wrote in src/module-add, as shown below.
 
-CREATE OR REPLACE FUNCTION core.text_chunk(
-    overview string, title string, budget string, popularity string, release_date string, runtime string
-)
-    returns table (chunk string, title string, budget string, popularity string, release_date string, runtime string)
-    language python
-    runtime_version = '3.9'
-    handler = 'text_chunker'
-    packages = ('snowflake-snowpark-python','langchain')
-    as
-$$
-from langchain.text_splitter import RecursiveCharacterTextSplitter
-import copy
-from typing import Optional
-
-class text_chunker:
-
-    def process(self, overview: Optional[str], title: str, budget: str, popularity: str, release_date: str, runtime: str):
-        # Handle None values for all input strings
-        overview = overview or ""
-        title = title or ""
-        budget = budget or ""
-        popularity = popularity or ""
-        release_date = release_date or ""
-        runtime = runtime or ""
-
-        text_splitter = RecursiveCharacterTextSplitter(
-            chunk_size = 2000,
-            chunk_overlap  = 300,
-            length_function = len
-        )
-        chunks = text_splitter.split_text(overview)
-        for chunk in chunks:
-            yield (title + "\n" + budget + "\n" + popularity + "\n" + runtime + "\n" + chunk, title, budget, popularity, release_date, runtime) # always chunk with title
-$$;
-
 CREATE OR REPLACE PROCEDURE core.table_chunker()
-    RETURNS string
-    LANGUAGE sql
-    AS $$
+RETURNS STRING
+LANGUAGE SQL
+AS
+$$
 BEGIN
-    EXECUTE IMMEDIATE 'CREATE or replace TABLE movies.data.movies_metadata_chunked AS (
-    SELECT
-        movies.*,
-        t.CHUNK as CHUNK
-    FROM movies.data.movies_raw movies,
-        TABLE(core.text_chunk(movies.overview, movies.title, movies.budget, movies.popularity, movies.release_date, movies.runtime))t)';
-GRANT SELECT ON TABLE MOVIES.DATA.MOVIES_METADATA_CHUNKED TO application role app_public;
-RETURN 'Table Chunked!';
+    EXECUTE IMMEDIATE '
+        CREATE OR REPLACE TABLE movies.data.movies_metadata_chunked AS
+        SELECT
+            m.*,
+            COALESCE(m.title, '''') || ''\n'' ||
+            COALESCE(m.budget, '''') || ''\n'' ||
+            COALESCE(m.popularity, '''') || ''\n'' ||
+            COALESCE(m.runtime, '''') || ''\n'' ||
+            COALESCE(m.release_date, '''') || ''\n'' ||
+            f.value AS chunk
+        FROM movies.data.movies_raw m,
+        LATERAL FLATTEN(
+            INPUT => snowflake.cortex.split_text_recursive_character(
+                COALESCE(m.overview, ''''),
+                CAST(NULL AS STRING),
+                2000,
+                300
+            )
+        ) f
+    ';
+
+    GRANT SELECT ON TABLE movies.data.movies_metadata_chunked TO APPLICATION ROLE app_public;
+
+    RETURN 'Table Chunked!';
 END;
 $$;
 
@@ -101,7 +83,6 @@ CREATE OR REPLACE PROCEDURE core.register_single_callback(ref_name STRING, opera
 
 
 -- 4. Grant appropriate privileges over these objects to your application roles.
-GRANT USAGE ON FUNCTION core.text_chunk( STRING,  STRING,  STRING, STRING, STRING, STRING) TO APPLICATION ROLE app_public;
 GRANT USAGE ON PROCEDURE core.table_chunker() TO APPLICATION ROLE app_public;
 GRANT USAGE ON PROCEDURE core.create_cortex_search() TO APPLICATION ROLE app_public;
 GRANT USAGE ON PROCEDURE core.register_single_callback( STRING,  STRING,  STRING) TO APPLICATION ROLE app_public;
