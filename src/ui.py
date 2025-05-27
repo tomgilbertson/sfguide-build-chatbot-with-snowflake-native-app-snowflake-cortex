@@ -1,6 +1,7 @@
 import streamlit as st
 from snowflake.core import Root # requires snowflake>=0.8.0
 from snowflake.snowpark.context import get_active_session
+import time
 
 MODELS = [
     "mistral-large",
@@ -224,12 +225,65 @@ def create_prompt(user_question):
         """
     return prompt
 
+def init_chunking():
+    st.markdown("We have not detected a Cortex Service or a chunked table. Please click below to set this up")
+    if st.button('Prepare Service'):
+        try:
+            with st.spinner("Preparing service... please wait."):
+                session.sql("BEGIN \
+                                call CORTEX_APP_INSTANCE.CORE.TABLE_CHUNKER();\
+                                call CORTEX_APP_INSTANCE.CORE.CREATE_CORTEX_SEARCH();\
+                            END").collect()
+
+                st.success("Table chunked and Cortex Service created. Reloading...")
+
+                # Reload service metadata
+                st.session_state.pop("service_metadata", None)  # Clear old metadata if exists
+
+                # Re-fetch service metadata
+                init_service_metadata()
+                
+                if st.session_state.service_metadata and st.session_state.service_metadata:
+                    st.session_state.selected_cortex_search_service = st.session_state.service_metadata[0]["name"]
+
+
+                # Rerun the app cleanly
+                st.rerun()
+        except Exception as e:
+            st.error(f"An error occurred: {e}")
+
+def ensure_service_ready():
+    """
+    Ensure that a Cortex Search Service exists and is selected.
+    If no service exists, create one and rerun the app.
+    """
+    init_service_metadata()
+
+    # If no service exists yet, prepare one
+    if "service_metadata" not in st.session_state or not st.session_state.service_metadata:
+        init_chunking()
+        st.stop()
+
+    # If no selection made yet, select the first service
+    if "selected_cortex_search_service" not in st.session_state:
+        st.session_state.selected_cortex_search_service = st.session_state.service_metadata[0]["name"]
+
+
 def main():
     st.title(f":movie_camera: Snowflake CineBot")
 
-    init_service_metadata()
+    ensure_service_ready()
     init_config_options()
     init_messages()
+
+    # If the underlying service has not been created, disable the chat and display config
+    disable_chat = (
+        "service_metadata" not in st.session_state
+        or len(st.session_state.service_metadata) == 0
+    )
+
+    if disable_chat:
+        init_chunking()
 
     icons = {"assistant": "❄️", "user": "👤"}
 
@@ -238,10 +292,6 @@ def main():
         with st.chat_message(message["role"], avatar=icons[message["role"]]):
             st.markdown(message["content"])
 
-    disable_chat = (
-        "service_metadata" not in st.session_state
-        or len(st.session_state.service_metadata) == 0
-    )
     if question := st.chat_input("Ask a question...", disabled=disable_chat):
         # Add user message to chat history
         st.session_state.messages.append({"role": "user", "content": question})
