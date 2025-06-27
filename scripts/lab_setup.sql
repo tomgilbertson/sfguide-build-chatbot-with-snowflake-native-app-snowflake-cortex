@@ -8,6 +8,7 @@ grant create application package on account to role nactx_role;
 grant create application on account to role nactx_role with grant option;
 
 --Step 3.2 - Create CORTEX_APP Database to Store Application Files 
+--provider role
 use role nactx_role;
 create database if not exists cortex_app;
 create schema if not exists cortex_app.napp;
@@ -16,6 +17,7 @@ create warehouse if not exists wh_nap with warehouse_size='xsmall';
 
 -- Step 4.1 - Create NAC role and Grant Privileges
 use role accountadmin;
+--nac is the consumer role
 create role if not exists nac;
 grant role nac to role accountadmin;
 grant create warehouse on account to role nac;
@@ -90,6 +92,19 @@ create application package cortex_app_pkg;
 --Step 5.2 - Upload Native App Code
 --Upload the code from the App and src files into the Cortex Database App Stage
 
+{# Upload Native App Code
+After creating the application package we'll need to upload the Native App code to the the CORTEX_APP.NAPP.APP_STAGE stage. This can be accomplished by navigating to this stage using Snowsight - click on the ‘Database' icon on the left side navigation bar and then on the CORTEX_APP database > NAPP schema > APP_STAGE stage. You will need to do the following:
+
+Click on ‘Select Warehouse' and choose ‘WH_NAP' for the Warehouse
+Click on the ‘+ Files' button in the top right corner
+Browse to the location where you cloned or downloaded the Github repo and into the ‘/app/' folder
+Select all 3 files (setup.sql, manifest.yml, readme.md)
+Click the ‘Upload' button
+Browse back up one level and then go into the ‘/src/' folder
+Select both files (ui.py, environment.yaml)
+Click the ‘Upload' button
+When this is done succesfully your we're now ready to create the Application Package. #}
+
 --Step 5.3 - Create Application Package
 alter application package cortex_app_pkg add version v1 using @cortex_app.napp.app_stage;
 grant install, develop on application package cortex_app_pkg to role nac;
@@ -113,6 +128,10 @@ GRANT IMPORTED PRIVILEGES ON DATABASE SNOWFLAKE TO APPLICATION cortex_app_instan
 use role nac;
 call CORTEX_APP_INSTANCE.CORE.TABLE_CHUNKER();
 call CORTEX_APP_INSTANCE.CORE.CREATE_CORTEX_SEARCH();
+
+
+{# At this point you can navigate the the Application by clicking on ‘Data Products' on the left side of the Snowsight screen and then by clicking on ‘Apps'. You can click on the Cortext_App_Instance application and it will bring up the chatbot where you can ask it to recommend movies. #}
+
 
 
 --Step 7.1 - Clean Up
